@@ -9,7 +9,7 @@ import glob
 # ==================================================
 st.set_page_config(
     page_title="Aadhaar Lifecycle Analysis",
-    page_icon="🆔"
+    page_icon="🆔",
     layout="wide"
 )
 
