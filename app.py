@@ -1,18 +1,15 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import numpy as np
 import os
 import glob
-import re
-from sklearn.linear_model import LinearRegression
 
 # ==================================================
 # PAGE CONFIG
 # ==================================================
 st.set_page_config(
     page_title="Aadhaar Lifecycle Analysis",
-    page_icon="🆔",
+    page_icon="🆔"
     layout="wide"
 )
 
@@ -31,48 +28,30 @@ st.markdown("""
     color: #555;
     margin-bottom: 20px;
 }
+.card {
+    background-color: #f5f7ff;
+    padding: 18px;
+    border-radius: 14px;
+}
 </style>
 """, unsafe_allow_html=True)
 
 # ==================================================
-# STATE NAME NORMALIZATION
-# ==================================================
-STATE_CANONICAL_MAP = {
-    "westbengal": "West Bengal",
-    "westbangal": "West Bengal",
-    "westbengli": "West Bengal",
-    "uttaranchal": "Uttarakhand",
-    "uttarakhand": "Uttarakhand",
-    "orissa": "Odisha",
-    "odisha": "Odisha",
-    "pondicherry": "Puducherry",
-    "puducherry": "Puducherry",
-    "tamilnadu": "Tamil Nadu",
-    "andhrapradesh": "Andhra Pradesh",
-    "madhyapradesh": "Madhya Pradesh",
-    "uttarpradesh": "Uttar Pradesh",
-    "jammuandkashmir": "Jammu and Kashmir"
-}
-
-def normalize_state_name(state):
-    if pd.isna(state):
-        return None
-    s = str(state).lower()
-    s = re.sub(r"[^a-z]", "", s)
-    return STATE_CANONICAL_MAP.get(s, state.title())
-
-# ==================================================
-# DATA LOADER
+# DATA LOADER (SINGLE, SAFE)
 # ==================================================
 @st.cache_data
 def load_folder_csvs(folder_path):
     files = glob.glob(os.path.join(folder_path, "*.csv"))
+    if not files:
+        return pd.DataFrame()
+
     dfs = []
     for f in files:
         try:
             dfs.append(pd.read_csv(f, low_memory=False))
-        except:
-            pass
+        except Exception as e:
+            st.warning(f"Failed to load {f}: {e}")
+
     return pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
 
 # ==================================================
@@ -82,34 +61,10 @@ enrol_df = load_folder_csvs("data/api_data_aadhar_enrolment")
 demo_df  = load_folder_csvs("data/api_data_aadhar_demographic")
 bio_df   = load_folder_csvs("data/api_data_aadhar_biometric")
 
-if "state" in bio_df.columns:
-    bio_df["state_clean"] = bio_df["state"].apply(normalize_state_name)
-
 # ==================================================
-# ML PREDICTION MODELS
-# ==================================================
-def linear_predict(values, steps):
-    X = np.arange(len(values)).reshape(-1, 1)
-    y = np.array(values)
-    model = LinearRegression()
-    model.fit(X, y)
-    future_X = np.arange(len(values), len(values) + steps).reshape(-1, 1)
-    return model.predict(future_X).astype(int)
-
-def moving_average_predict(values, steps, window=3):
-    values = list(values)
-    preds = []
-    for _ in range(steps):
-        avg = int(np.mean(values[-window:]))
-        preds.append(avg)
-        values.append(avg)
-    return preds
-
-# ==================================================
-# SIDEBAR
+# SIDEBAR NAVIGATION
 # ==================================================
 st.sidebar.title("🆔 Aadhaar Dashboard")
-
 menu = st.sidebar.radio(
     "Navigation",
     [
@@ -122,29 +77,25 @@ menu = st.sidebar.radio(
     ]
 )
 
-st.sidebar.markdown("### 🔮 Prediction Controls")
-
-model_type = st.sidebar.selectbox(
-    "Prediction Model",
-    ["Linear Regression", "Moving Average"]
-)
-
-future_steps = st.sidebar.slider(
-    "Future Cycles",
-    1, 12, 3
-)
-
 # ==================================================
 # OVERVIEW
 # ==================================================
 if menu == "Overview":
     st.markdown('<div class="main-title">Lifecycle-Based Aadhaar Update Analysis</div>', unsafe_allow_html=True)
-    st.markdown('<div class="sub-title">Aggregated • Anonymised • ML-driven</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sub-title">Aggregated | Anonymised | Lifecycle-driven</div>', unsafe_allow_html=True)
+
+    st.markdown("### 🎯 Project Objectives")
+    st.markdown("""
+    - Analyse age-wise Aadhaar enrolment patterns  
+    - Identify lifecycle-based update peaks  
+    - Detect regional update disparities  
+    - Propose a smart, proactive update framework  
+    """)
 
     c1, c2, c3 = st.columns(3)
-    c1.metric("Enrolment Records", f"{len(enrol_df):,}")
-    c2.metric("Demographic Updates", f"{len(demo_df):,}")
-    c3.metric("Biometric Updates", f"{len(bio_df):,}")
+    c1.metric("Total Enrolment Records", f"{len(enrol_df):,}")
+    c2.metric("Demographic Update Records", f"{len(demo_df):,}")
+    c3.metric("Biometric Update Records", f"{len(bio_df):,}")
 
 # ==================================================
 # AGE-WISE ENROLMENT
@@ -153,90 +104,114 @@ elif menu == "Age-wise Enrolment":
     st.header("👶🧑 Age-wise Aadhaar Enrolment")
 
     age_cols = ["age_0_5", "age_5_17", "age_18_greater"]
-    data = enrol_df[age_cols].sum()
 
-    preds = (
-        linear_predict(data.values, future_steps)
-        if model_type == "Linear Regression"
-        else moving_average_predict(data.values, future_steps)
-    )
+    if enrol_df.empty or not all(c in enrol_df.columns for c in age_cols):
+        st.error("Required age columns not found in enrolment data.")
+    else:
+        age_summary = enrol_df[age_cols].sum().reset_index()
+        age_summary.columns = ["Age Group", "Total Enrolments"]
 
-    plot_df = pd.DataFrame({
-        "Cycle": list(data.index) + [f"Future {i+1}" for i in range(future_steps)],
-        "Enrolments": list(data.values) + list(preds)
-    })
+        fig = px.bar(
+            age_summary,
+            x="Age Group",
+            y="Total Enrolments",
+            text_auto=True,
+            title="Age-wise Aadhaar Enrolment Distribution"
+        )
+        st.plotly_chart(fig, use_container_width=True)
 
-    fig = px.line(plot_df, x="Cycle", y="Enrolments", markers=True,
-                  title=f"Enrolment Forecast ({model_type})")
-    st.plotly_chart(fig, use_container_width=True)
+        st.info(
+            "Higher enrolment volumes are observed during early childhood "
+            "and adulthood, reflecting key lifecycle registration phases."
+        )
 
 # ==================================================
 # DEMOGRAPHIC UPDATES
 # ==================================================
 elif menu == "Demographic Updates":
-    st.header("🧾 Demographic Update Forecast")
+    st.header("🧾 Demographic Update Analysis")
 
     demo_cols = ["demo_age_5_17", "demo_age_17_"]
-    data = demo_df[demo_cols].sum()
 
-    preds = (
-        linear_predict(data.values, future_steps)
-        if model_type == "Linear Regression"
-        else moving_average_predict(data.values, future_steps)
-    )
+    if demo_df.empty or not all(c in demo_df.columns for c in demo_cols):
+        st.error("Required demographic age columns not found.")
+    else:
+        demo_summary = demo_df[demo_cols].sum().reset_index()
+        demo_summary.columns = ["Age Group", "Demographic Updates"]
 
-    plot_df = pd.DataFrame({
-        "Cycle": list(data.index) + [f"Future {i+1}" for i in range(future_steps)],
-        "Updates": list(data.values) + list(preds)
-    })
+        fig = px.bar(
+            demo_summary,
+            x="Age Group",
+            y="Demographic Updates",
+            text_auto=True,
+            title="Age-wise Demographic Updates"
+        )
+        st.plotly_chart(fig, use_container_width=True)
 
-    fig = px.bar(plot_df, x="Cycle", y="Updates",
-                 title=f"Demographic Update Forecast ({model_type})")
-    st.plotly_chart(fig, use_container_width=True)
+        st.success(
+            "A sharp rise in demographic updates after age 17 highlights "
+            "identity detail changes during adulthood."
+        )
 
 # ==================================================
 # BIOMETRIC LIFECYCLE
 # ==================================================
 elif menu == "Biometric Lifecycle":
-    st.header("🧬 Biometric Lifecycle Forecast")
+    st.header("🧬 Biometric Update Lifecycle")
 
-    age_cols = [c for c in bio_df.columns if "age" in c.lower()]
-    data = bio_df[age_cols].sum()
+    bio_age_cols = [c for c in bio_df.columns if "age" in c.lower()]
 
-    preds = (
-        linear_predict(data.values, future_steps)
-        if model_type == "Linear Regression"
-        else moving_average_predict(data.values, future_steps)
-    )
+    if bio_df.empty or not bio_age_cols:
+        st.error("No biometric age columns found.")
+    else:
+        bio_summary = bio_df[bio_age_cols].sum().reset_index()
+        bio_summary.columns = ["Age Group", "Biometric Updates"]
 
-    plot_df = pd.DataFrame({
-        "Cycle": list(data.index) + [f"Future {i+1}" for i in range(future_steps)],
-        "Updates": list(data.values) + list(preds)
-    })
+        fig = px.line(
+            bio_summary,
+            x="Age Group",
+            y="Biometric Updates",
+            markers=True,
+            title="Biometric Update Peaks Across Lifecycle"
+        )
+        st.plotly_chart(fig, use_container_width=True)
 
-    fig = px.line(plot_df, x="Cycle", y="Updates", markers=True,
-                  title=f"Biometric Update Forecast ({model_type})")
-    st.plotly_chart(fig, use_container_width=True)
+        st.info(
+            "Biometric updates peak during adolescence and early adulthood, "
+            "indicating mandatory compliance transition phases."
+        )
 
 # ==================================================
-# REGIONAL INSIGHTS (CLEAN STATES)
+# REGIONAL INSIGHTS
 # ==================================================
 elif menu == "Regional Insights":
-    st.header("🗺️ Regional Insights (Cleaned State Names)")
+    st.header("🗺️ Regional Update Insights")
 
-    states = sorted(bio_df["state_clean"].dropna().unique())
-    selected = st.selectbox("Select State", states)
+    if bio_df.empty or "state" not in bio_df.columns or "district" not in bio_df.columns:
+        st.error("State or district columns missing in biometric data.")
+    else:
+        states = sorted(bio_df["state"].dropna().unique())
+        selected_state = st.selectbox("Select State", states)
 
-    df = bio_df[bio_df["state_clean"] == selected]
-    district_summary = df.groupby("district").size().reset_index(name="Records")
+        state_df = bio_df[bio_df["state"] == selected_state]
+        district_summary = (
+            state_df.groupby("district")
+            .size()
+            .reset_index(name="Update Records")
+        )
 
-    fig = px.bar(
-        district_summary,
-        x="district",
-        y="Records",
-        title=f"Biometric Updates – {selected}"
-    )
-    st.plotly_chart(fig, use_container_width=True)
+        fig = px.bar(
+            district_summary,
+            x="district",
+            y="Update Records",
+            title=f"Biometric Updates by District – {selected_state}"
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+        st.warning(
+            "Districts with lower update activity may indicate "
+            "service access gaps or awareness issues."
+        )
 
 # ==================================================
 # SMART UPDATE FRAMEWORK
@@ -245,17 +220,31 @@ elif menu == "Smart Update Framework":
     st.header("🔔 Smart Aadhaar Update Framework")
 
     st.markdown("""
-    **ML-powered lifecycle system** that:
-    - Predicts update demand
-    - Detects regional risk
-    - Enables proactive notifications
-    - Preserves citizen privacy
+    ### 💡 Concept
+    A **lifecycle-aware, data-driven reminder system** that ensures timely Aadhaar updates
+    **without using personal data**.
     """)
 
-    st.success("✔ Policy-ready • ✔ Scalable • ✔ Privacy-by-design")
+    st.markdown("### 🧠 Core Components")
+    st.markdown("""
+    1. Lifecycle Trigger Engine  
+    2. Regional Risk Scoring  
+    3. Update Demand Forecasting  
+    4. Citizen Notification Layer  
+    """)
+
+    st.success("""
+    ✅ Reduced update backlog  
+    ✅ Improved Aadhaar accuracy  
+    ✅ Better citizen experience  
+    ✅ Optimised service planning  
+    """)
 
 # ==================================================
 # FOOTER
 # ==================================================
 st.markdown("---")
-st.caption("🆔 Aadhaar Lifecycle Dashboard | Hackathon Project | Aggregated UIDAI Data")
+st.caption(
+    "🆔 Aadhaar Lifecycle Analysis | Hackathon Project | "
+    "All insights derived from anonymised, aggregated UIDAI data"
+)
